@@ -1,44 +1,63 @@
 pipeline {
     agent { label 'ci-python-docker' }
 
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+    }
+
     stages {
-        stage('Prepare') {
+        stage('Checkout') {
             steps {
-                sh 'mkdir -p dist'
-                echo 'Ambiente preparado'
+                deleteDir()
+                checkout scm
+                sh 'git log -1 --oneline'
             }
         }
 
-        stage('Build') {
+        stage('Setup') {
             steps {
                 sh '''
                     set -eu
-                    printf 'Estado: OK\n' > dist/resultado.txt
+                    python3 -m venv .venv
+                    .venv/bin/python -m pip install -r requirements-dev.txt
                 '''
             }
         }
 
         stage('Test') {
             steps {
-                sh "grep -q 'Estado: OK' dist/resultado.txt"
+                sh '''
+                    set -eu
+                    mkdir -p reports
+                    .venv/bin/python -m pytest -q \
+                    --junitxml=reports/junit.xml
+                '''
             }
-        }
 
-        stage('Package') {
-            steps {
-                archiveArtifacts artifacts: 'dist/resultado.txt',
-                                 fingerprint: true
+            post {
+                always {
+                    script {
+                        if (fileExists('reports/junit.xml')) {
+                            junit testResults: 'reports/junit.xml'
+                        } else {
+                            echo 'Relatório de testes indisponível'
+                        }
+                    }
+                }
             }
         }
     }
 
     post {
         success {
-            echo 'Pipeline concluída'
+            echo 'CI concluída com sucesso'
         }
 
         failure {
-            echo 'Pipeline com erro'
+            echo 'CI com erro — consultar Console Output'
         }
     }
 }
